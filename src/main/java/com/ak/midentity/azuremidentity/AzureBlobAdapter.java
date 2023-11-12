@@ -30,8 +30,8 @@ public class AzureBlobAdapter {
             @Value("${azure.client.secret}") String clientSecret,
             @Value("${azure.tenant.id}") String tenantId,
             @Value("${azure.storage.blob-endpoint}") String blobEndpoint) {
-        // Authenticate with Azure AD using DefaultAzureCredential
-        // This will use environment variables for authentication details
+        // Authenticate with Azure AD using DefaultAzureCredential when running your app 
+        // in Azure
 
         ClientSecretCredential clientSecretCredential = new ClientSecretCredentialBuilder()
                 .clientId(clientId)
@@ -39,7 +39,6 @@ public class AzureBlobAdapter {
                 .tenantId(tenantId)
                 .build();
 
-        System.out.println("##### ClientSecret creds built #######");
 
         // new DefaultAzureCredentialBuilder().build()
         blobServiceClient = new BlobServiceClientBuilder()
@@ -48,46 +47,48 @@ public class AzureBlobAdapter {
                 .buildClient();
     }
 
+    /**
+     * Upload file to Azure Blob Storage
+     * 
+     * @param containerName
+     * @param file
+     * @return
+     */
     public String uploadFile(String containerName, MultipartFile file) {
-        // Get the container client
+
         BlobContainerClient containerClient = blobServiceClient.getBlobContainerClient(containerName);
-        // Get a reference to a blob
         BlobClient blobClient = containerClient.getBlobClient(file.getOriginalFilename());
 
-        // Get a user delegation key from Azure AD (valid for a limited time)
+        // Get a user delegation key from Azure AD (valid for one day)
         OffsetDateTime keyStart = OffsetDateTime.now();
         OffsetDateTime keyExpiry = OffsetDateTime.now().plusDays(1);
         UserDelegationKey userDelegationKey = blobServiceClient.getUserDelegationKey(keyStart, keyExpiry);
 
         System.out.println("##### UserDelegationKey #######" + userDelegationKey.toString() +
                 userDelegationKey.getSignedExpiry());
-
         // get SAS token from delegation key
         String sasToken = generateSasToken(blobClient, userDelegationKey);
-        System.out.println("##### SAS token: " + sasToken);
-
+    
         // Upload file using SAS token
         BlobClient sasBlobClient = new BlobClientBuilder().endpoint(blobClient.getBlobUrl()).sasToken(sasToken)
                 .buildClient();
 
         try {
-            // Uploading the file to the blob storage
-
             sasBlobClient.upload(file.getInputStream(), file.getSize());
-            // blobClient.upload(file.getInputStream(), file.getSize());
-
             // return blob url with the sas token appended as query string
-            System.out.println("FQLink " + sasBlobClient.getBlobUrl() + "?" + sasToken);
-
             return sasBlobClient.getBlobUrl() + "?" + sasToken;
 
         } catch (IOException e) {
-            // Handle exceptions as necessary
             e.printStackTrace();
             return null;
         }
     }
 
+    /**
+     * List all the files in the Azure storage container
+     * 
+     * @return List of file urls
+     */
     public List<String> listFiles() {
 
         BlobContainerClient containerClient = blobServiceClient.getBlobContainerClient("uploads");
@@ -107,7 +108,7 @@ public class AzureBlobAdapter {
      * @return
      */
     private String generateSasToken(BlobClient blobClient, UserDelegationKey userDelegationKey) {
-
+        
         BlobServiceSasSignatureValues sasSignatureValues = new BlobServiceSasSignatureValues(
                 OffsetDateTime.now().plusMinutes(5), //
                 new BlobContainerSasPermission().setCreatePermission(true)
